@@ -1,0 +1,133 @@
+// style 级联 / 状态 / 选择器 / 盒模型 / 层级 + Theme 主题对象冒烟（自 cleg tests/state-cascade.qk 迁入）
+import "style";
+
+program main;
+
+// 测试节点：结构化满足 StyleNode（getStyle/setStyle/getX/getY/getW/getH）
+type struct {
+    HashTable<String, String> style;
+    int x;
+    int y;
+    int w;
+    int h;
+} TNode;
+
+impl {
+    fn new(int x, int y, int w, int h) TNode {
+        TNode n;
+        n.style = HashTable::new();
+        n.x = x; n.y = y; n.w = w; n.h = h;
+        return n;
+    }
+    fn getStyle(TNode self) HashTable<String, String> { return self.style; }
+    fn setStyle(TNode self, String jsonText) void { style::setStyle(self, jsonText); }
+    fn getX(TNode self) int { return self.x; }
+    fn getY(TNode self) int { return self.y; }
+    fn getW(TNode self) int { return self.w; }
+    fn getH(TNode self) int { return self.h; }
+} TNode;
+
+fn chk(IOStream io, String name, bool cond) void {
+    if (cond) { io.println("OK " + name); } else { io.println("FAIL " + name); }
+}
+
+fn main(IOStream io) {
+    // ---- 选择器块（CSS2 特异性）----
+    TNode b = TNode::new(0, 0, 220, 60);
+    b.getStyle()["__type"] = "ClegButton";
+    b.getStyle()["object-name"] = "ok";
+    b.setStyle("{\"*\": {\"color\": \"#ff0000\"}, \"ClegButton\": {\"color\": \"#00ff00\"}, \"ClegButton#ok\": {\"color\": \"#0000ff\"}, \"ClegButton:hover\": {\"color\": \"#ffff00\"}, \"ClegButton::chunk\": {\"background-color\": \"#123456\"}}");
+    chk(io, "selector-id-100", style::get(b, "color", "") == "#0000ff");
+    chk(io, "selector-pseudo", style::get(b, "color", "hover") == "#ffff00");
+    chk(io, "selector-sub", style::getSub(b, "background-color", "chunk", "") == "#123456");
+    chk(io, "selector-seq", b.getStyle().get("__selseq") == "5");
+
+    // ---- 状态后缀（多状态最具体→最宽泛）----
+    b.getStyle()["background-color"] = "10,20,30";
+    b.getStyle()["background-color:pressed"] = "1,2,3";
+    b.getStyle()["background-color:hover:pressed"] = "4,5,6";
+    chk(io, "state-both", style::get(b, "background-color", "hover:pressed") == "4,5,6");
+    chk(io, "state-wide", style::get(b, "background-color", "hover") == "10,20,30");
+    chk(io, "state-single", style::get(b, "background-color", "pressed") == "1,2,3");
+    chk(io, "state-order-free", style::get(b, "background-color", "pressed:hover") == "4,5,6");
+
+    // ---- enabled=false 派生 :disabled ----
+    TNode d = TNode::new(0, 0, 100, 30);
+    d.getStyle()["__type"] = "ClegLabel";
+    d.getStyle()["enabled"] = "false";
+    d.getStyle()["color:disabled"] = "9,9,9";
+    d.getStyle()["color"] = "1,1,1";
+    chk(io, "disabled-derived", style::stateOf(d).indexOf("disabled") >= 0);
+    chk(io, "disabled-override", style::get(d, "color", style::stateOf(d)) == "9,9,9");
+    d.getStyle()["enabled"] = "true";
+    style::setState(d, "disabled", false);
+    chk(io, "state-bit-clear", style::get(d, "color", style::stateOf(d)) == "1,1,1");
+
+    // ---- Theme（实例化全局层；无文件、无模块级全局）----
+    TNode g = TNode::new(0, 0, 100, 40);
+    Theme th = Theme::fromJson("{\"color\": \"#101010\", \"font-size\": \"22\"}");
+    chk(io, "theme-parsed", th.size() == 2 && th.has("color") && th.get("font-size") == "22");
+    chk(io, "theme-not-applied", style::get(g, "color", "") == "");
+    th.apply(g);
+    chk(io, "theme-layer", style::get(g, "color", "") == "#101010");
+    chk(io, "theme-fontsize", style::getI(g, "font-size", "", 0) == 22);
+    chk(io, "theme-applied-idempotent", th.appliedTo(g));
+    g.getStyle()["color"] = "#202020";
+    chk(io, "self-over-theme", style::get(g, "color", "") == "#202020");
+    g.getStyle().remove("color");
+    th.set("color", "#303030");
+    th.apply(g);
+    chk(io, "theme-revision-rewrite", style::get(g, "color", "") == "#303030");
+    chk(io, "theme-getThemed", style::getThemed(th, g, "color", "") == "#303030");
+    th.remove("color");
+    th.apply(g);
+    chk(io, "theme-remove", style::get(g, "color", "") == "");
+
+    // ---- 低级入口：globalTo 直接写全局层；inherit 快照祖先层 ----
+    TNode g2 = TNode::new(0, 0, 100, 40);
+    style::globalTo(g2, "{\"color\": \"#404040\"}");
+    chk(io, "globalTo-low-level", style::get(g2, "color", "") == "#404040");
+    TNode parent = TNode::new(0, 0, 200, 100);
+    parent.getStyle()["__type"] = "ClegFrame";
+    parent.getStyle()["color"] = "77,88,99";
+    parent.getStyle()["background-color"] = "5,6,7";
+    TNode child = TNode::new(0, 0, 100, 30);
+    child.getStyle()["__type"] = "ClegLabel";
+    child.getStyle()["background-color"] = "8,9,10";
+    style::inherit(child, parent);
+    chk(io, "ancestor-inherit", style::get(child, "color", "") == "77,88,99");
+    chk(io, "self-over-ancestor", style::get(child, "background-color", "") == "8,9,10");
+    chk(io, "ancestor-backdrop", style::get(child, "backdrop", "") == "5,6,7");
+
+    // ---- 动画层最高优先 ----
+    child.getStyle()["__anim~color"] = "1,2,3";
+    chk(io, "anim-top", style::get(child, "color", "") == "1,2,3");
+
+    // ---- 盒模型 ----
+    TNode box = TNode::new(0, 0, 100, 50);
+    box.setStyle("{\"pos\": \"0,0\", \"margin\": \"5\", \"padding\": \"4\", \"border-width\": \"2\"}");
+    Rect r = style::contentRect(box);
+    chk(io, "box-content", r.x == 11 && r.y == 11 && r.w == 78 && r.h == 28);
+    Rect br = style::borderRect(box);
+    chk(io, "box-border", br.x == 5 && br.y == 5 && br.w == 90 && br.h == 40);
+    box.setStyle("{\"margin\": \"1,2,3,4\", \"padding\": \"0\", \"border-width\": \"0\"}");
+    Rect r2 = style::contentRect(box);
+    chk(io, "box-4val", r2.x == 0 + 4 && r2.y == 0 + 1 && r2.w == 100 - 2 - 4 && r2.h == 50 - 1 - 3);
+    box.setStyle("{\"box-sizing\": \"content\", \"margin\": \"0\", \"padding\": \"4\", \"border-width\": \"2\"}");
+    Rect r3 = style::contentRect(box);
+    chk(io, "box-content-sizing", r3.w == 100 && r3.h == 50);
+    // 状态层影响盒模型：checked 状态下的 padding 参与 contentRect（文字 y 与内边距/圆角的关系）
+    TNode sb = TNode::new(0, 0, 100, 50);
+    sb.setStyle("{\"padding\": \"0\", \"padding:checked\": \"10\", \"border-radius\": \"999\"}");
+    style::setState(sb, "checked", true);
+    Rect rc = style::contentRect(sb);
+    chk(io, "state-padding-box", rc.x == 10 && rc.y == 10 && rc.w == 80 && rc.h == 30);
+    chk(io, "state-center-stable", rc.y + rc.h / 2 == 25);
+
+    // ---- 颜色/长度解析（经 get 读回）----
+    TNode col = TNode::new(0, 0, 100, 30);
+    col.getStyle()["__type"] = "ClegLabel";
+    col.getStyle()["color"] = "rgba(1,2,3,0.5)";
+    chk(io, "color-alpha-value", style::get(col, "color", "") == "rgba(1,2,3,0.5)");
+    chk(io, "color-parse", qss::cA(qss::color(style::get(col, "color", ""))) == 128);
+}

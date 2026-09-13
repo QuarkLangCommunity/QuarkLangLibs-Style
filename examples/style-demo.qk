@@ -1,0 +1,83 @@
+// style 库最小示例：不依赖 cleg / 不依赖任何 GUI 与 FFI，只展示数值结果
+//   qss 值解析 → style 级联（Theme 全局层 + 自身 + 状态 + 选择器）→ 盒模型 → Animator 插值
+import "style";
+
+program main;
+
+// 最小节点：只要实现 StyleNode 的 6 个方法即可参与求值（结构化满足）
+type struct {
+    HashTable<String, String> style;
+    int x;
+    int y;
+    int w;
+    int h;
+} Box;
+
+impl {
+    fn new(int x, int y, int w, int h) Box {
+        Box b;
+        b.style = HashTable::new();
+        b.x = x; b.y = y; b.w = w; b.h = h;
+        return b;
+    }
+    fn getStyle(Box self) HashTable<String, String> { return self.style; }
+    fn setStyle(Box self, String jsonText) void { style::setStyle(self, jsonText); }
+    fn getX(Box self) int { return self.x; }
+    fn getY(Box self) int { return self.y; }
+    fn getW(Box self) int { return self.w; }
+    fn getH(Box self) int { return self.h; }
+} Box;
+
+fn main(IOStream io) {
+    // ---- 1) 值解析（纯计算） ----
+    io.println("[parse] len(12px)=" + qss::len("12px", 0).toString() + " box4(1,2,3,4)=" + qss::box4("1,2,3,4").toString());
+    io.println("[parse] color(#34d3eb)=" + qss::argbStr(qss::color("#34d3eb")) + " rgba(1,2,3,0.5).a=" + qss::cA(qss::color("rgba(1,2,3,0.5)")).toString());
+    StyleTransform tf = qss::transform("translate(10,20) scale(1.5)");
+    io.println("[parse] transform dx=" + tf.dx.toString() + " dy=" + tf.dy.toString() + " sx=" + tf.sxn.toString() + "/" + tf.sxd.toString());
+    StyleGradient gr = qss::gradient("linear(90,#ff0000,0,#0000ff,1)");
+    io.println("[parse] gradient kind=" + gr.kind.toString() + " dir=" + qss::gradDir(gr.angle).toString());
+    io.println("[parse] ease cubic-bezier(0,0,1,1)@0.25=" + qss::fmtFloat(qss::ease("cubic-bezier(0,0,1,1)", 0.25)));
+
+    // ---- 2) 级联：Theme（全局层）< 自身 < 选择器 < 状态 ----
+    Box b = Box::new(20, 20, 160, 48);
+    b.getStyle()["__type"] = "Box";
+    Theme theme = Theme::fromJson("{\"color\": \"#8899aa\", \"font-size\": \"12\", \"padding\": \"4\"}");
+    theme.apply(b);
+    b.setStyle("{\"background-color\":\"#101820\",\"color:hover\":\"#ffcc00\",\"padding\":\"8\",\"border-width\":\"2\",\"margin\":\"4\",\"border-radius\":\"10\"}");
+    io.println("[cascade] color=" + style::get(b, "color", "") + " (theme) / hover=" + style::get(b, "color", "hover") + " (state)");
+    io.println("[cascade] font-size=" + style::get(b, "font-size", "") + " (theme) / padding=" + style::get(b, "padding", "") + " (self over theme)");
+    Rect br = style::borderRect(b);
+    Rect cr = style::contentRect(b);
+    io.println("[box] borderRect=" + br.x.toString() + "," + br.y.toString() + "," + br.w.toString() + "," + br.h.toString()
+        + " contentRect=" + cr.x.toString() + "," + cr.y.toString() + "," + cr.w.toString() + "," + cr.h.toString());
+
+    // ---- 3) Animator：关键帧插值 + transition 补间（状态在实例内） ----
+    Animator an = Animator::new();
+    an.define("pulse", "{\"0\":{\"opacity\":\"1\",\"transform\":\"translate(0,0) scale(1)\"},\"0.5\":{\"opacity\":\"0.4\",\"transform\":\"translate(20,10) scale(1.2)\"},\"1\":{\"opacity\":\"1\",\"transform\":\"translate(0,0) scale(1)\"}}");
+    b.getStyle()["animation"] = "pulse 1000ms linear 0ms 1 normal both";
+    List<StyleNode> nodes = [];
+    nodes.append(b);
+    an.tick(nodes, 250);
+    io.println("[anim] t=250ms opacity=" + style::get(b, "opacity", "") + " transform=" + style::get(b, "transform", ""));
+    an.tick(nodes, 250);
+    io.println("[anim] t=500ms opacity=" + style::get(b, "opacity", "") + " transform=" + style::get(b, "transform", ""));
+    Box l = Box::new(0, 0, 40, 20);
+    l.getStyle()["opacity"] = "1";
+    l.getStyle()["transition"] = "opacity 400ms linear";
+    List<StyleNode> n2 = [];
+    n2.append(l);
+    an.tick(n2, 16);
+    l.getStyle()["opacity"] = "0";
+    an.tick(n2, 200);
+    io.println("[transition] opacity mid=" + style::get(l, "opacity", ""));
+
+    // ---- 4) 主题是实例：两个主题互不影响 ----
+    Theme light = Theme::fromJson("{\"color\":\"#111111\"}");
+    Theme dark = Theme::fromJson("{\"color\":\"#eeeeee\"}");
+    Box b1 = Box::new(0, 0, 10, 10);
+    Box b2 = Box::new(0, 0, 10, 10);
+    light.apply(b1);
+    dark.apply(b2);
+    io.println("[theme] b1=" + style::get(b1, "color", "") + " b2=" + style::get(b2, "color", "") + " light=" + light.get("color") + " dark=" + dark.get("color"));
+    io.println("style demo ok");
+}
