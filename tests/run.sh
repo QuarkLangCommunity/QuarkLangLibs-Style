@@ -9,7 +9,7 @@ if [ ! -x "$QUARK" ] && ! command -v "$QUARK" >/dev/null 2>&1; then
   echo "quark 解释器不可用：QUARK=$QUARK" >&2
   exit 2
 fi
-BUILD="$(mktemp -d /tmp/qlstyle-tests.XXXXXX)"
+BUILD="$(mktemp -d)"
 trap 'rm -rf "$BUILD"' EXIT
 cp "$ROOT/style.qk" "$BUILD/style.qk"
 
